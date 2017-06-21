@@ -61,7 +61,7 @@ describe(isNodeRuntime ? "node" : "browser", () => {
       expect(connectError).to.not.be.an("error")
       session.disconnect(disconnectError => {
         expect(disconnectError).not.be.an("error")
-        expect(session.getServerStatus).to.throw() // example use of disconnected client should fail
+        expect(() => session.getFields("flights_donotmodify")).to.throw() // example use of disconnected client should fail
         done()
       })
     })

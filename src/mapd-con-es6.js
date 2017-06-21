@@ -1,3 +1,8 @@
+/* eslint-disable no-unused-vars */
+// TODO make only public methods public.
+// TODO remove array login stuff.
+// TODO remove unused private methods and variables.
+
 const {TDatumType, TEncodingType, TPixel} = (isNodeRuntime() && require("../build/thrift/node/mapd_types.js")) || window // eslint-disable-line global-require
 const MapDThrift = isNodeRuntime() && require("../build/thrift/node/mapd.thrift.js") // eslint-disable-line global-require
 let Thrift = (isNodeRuntime() && require("thrift")) || window.Thrift // eslint-disable-line global-require
@@ -13,49 +18,68 @@ import MapDClientV2 from "./mapd-client-v2"
 import processQueryResults from "./process-query-results"
 
 const COMPRESSION_LEVEL_DEFAULT = 3
+const DEFAULT_QUERY_TIME = 50
+const NUM_PINGS_PER_SERVER = 4
+
+function noop () { /* noop */ }
 
 function arrayify (maybeArray) { return Array.isArray(maybeArray) ? maybeArray : [maybeArray] }
 
 function isNodeRuntime () { return typeof window === "undefined" }
 
-class MapdCon {
+function publicizeMethods (theClass, methods) { methods.forEach(method => { theClass[method.name] = method }) }
 
-  constructor () {
-    this._host = null
-    this._user = null
-    this._password = null
-    this._port = null
-    this._dbName = null
-    this._client = null
-    this._sessionId = null
-    this._protocol = null
-    this._datumEnum = {}
-    this._logging = false
-    this._platform = "mapd"
-    this._nonce = 0
-    this._balanceStrategy = "adaptive"
-    this._numConnections = 0
-    this._lastRenderCon = 0
-    this.queryTimes = { }
-    this.serverQueueTimes = null
-    this.serverPingTimes = null
-    this.pingCount = null
-    this.DEFAULT_QUERY_TIME = 50
-    this.NUM_PINGS_PER_SERVER = 4
-    this.importerRowDesc = null
+function MapdCon () {
+  publicizeMethods(this, [connect, host, user, password, port, dbName, protocol, disconnect, getTablesAsync, getFields, query, renderVega, getResultRowForPixel])
 
-    // invoke initialization methods
-    this.invertDatumTypes()
-
-    this.processResults = (options = {}, result, callback) => {
-      const processor = processQueryResults(this._logging, this.updateQueryTimes)
-      const processResultsObject = processor(options, this._datumEnum, result, callback)
-      return processResultsObject
-    }
-
-    // return this to allow chaining off of instantiation
-    return this
+  let _host = null
+  let _user = null
+  let _password = null
+  let _port = null
+  let _dbName = null
+  let _client = null
+  let _sessionId = null
+  let _protocol = null
+  const _datumEnum = {}
+  let _logging = false
+  let _platform = "mapd"
+  let _nonce = 0
+  const _balanceStrategy = "adaptive"
+  let _numConnections = 0
+  let _lastRenderCon = 0
+  const queryTimes = { }
+  const serverQueueTimes = null
+  let serverPingTimes = null
+  const pingCount = null
+  let importerRowDesc = null
+  // invoke initialization methods
+  invertDatumTypes(_datumEnum)
+  function processResults (options = {}, result, callback) { // TODO having defaulted params should be "
+    const processor = processQueryResults(_logging, updateQueryTimes)
+    const processResultsObject = processor(options, _datumEnum, result, callback)
+    return processResultsObject
   }
+  /** @deprecated will default to query */
+  const queryAsync = query
+  /**
+   * Import a delimited table from a file.
+   * @param {String} tableName - desired name of the new table
+   * @param {String} fileName
+   * @param {TCopyParams} copyParams - see {@link TCopyParams}
+   * @param {TColumnType[]} headers -- a colleciton of metadata related to the table headers
+   */
+  const importTableAsync = importTableAsyncWrapper(false)
+  /**
+   * Import a geo table from a file.
+   * @param {String} tableName - desired name of the new table
+   * @param {String} fileName
+   * @param {TCopyParams} copyParams - see {@link TCopyParams}
+   * @param {TColumnType[]} headers -- a colleciton of metadata related to the table headers
+   */
+  const importTableGeoAsync = importTableAsyncWrapper(true)
+
+  // return this to allow chaining off of instantiation
+  return this
 
   /**
    * Create a connection to the server, generating a client and session id.
@@ -73,60 +97,60 @@ class MapdCon {
    *
    *   // ["om9E9Ujgbhl6wIzWgLENncjWsaXRDYLy"]
    */
-  connect (callback) {
-    if (this._sessionId) {
-      this.disconnect()
+  function connect (callback) {
+    if (_sessionId) {
+      disconnect()
     }
 
     // TODO: should be its own function
-    const allAreArrays = Array.isArray(this._host) && Array.isArray(this._port) && Array.isArray(this._user) && Array.isArray(this._password) && Array.isArray(this._dbName)
+    const allAreArrays = Array.isArray(_host) && Array.isArray(_port) && Array.isArray(_user) && Array.isArray(_password) && Array.isArray(_dbName)
     if (!allAreArrays) {
       return callback("All connection parameters must be arrays.")
     }
 
-    this._client = []
-    this._sessionId = []
+    _client = []
+    _sessionId = []
 
-    if (!this._user[0]) {
+    if (!_user[0]) {
       return callback("Please enter a username.")
-    } else if (!this._password[0]) {
+    } else if (!_password[0]) {
       return callback("Please enter a password.")
-    } else if (!this._dbName[0]) {
+    } else if (!_dbName[0]) {
       return callback("Please enter a database.")
-    } else if (!this._host[0]) {
+    } else if (!_host[0]) {
       return callback("Please enter a host name.")
-    } else if (!this._port[0]) {
+    } else if (!_port[0]) {
       return callback("Please enter a port.")
     }
 
     // now check to see if length of all arrays are the same and > 0
-    const hostLength = this._host.length
+    const hostLength = _host.length
     if (hostLength < 1) {
       return callback("Must have at least one server to connect to.")
     }
-    if (hostLength !== this._port.length || hostLength !== this._user.length || hostLength !== this._password.length || hostLength !== this._dbName.length) {
+    if (hostLength !== _port.length || hostLength !== _user.length || hostLength !== _password.length || hostLength !== _dbName.length) {
       return callback("Array connection parameters must be of equal length.")
     }
 
-    if (!this._protocol) {
-      this._protocol = this._host.map(() => window.location.protocol.replace(":", ""))
+    if (!_protocol) {
+      _protocol = _host.map(() => window.location.protocol.replace(":", ""))
     }
 
-    const transportUrls = this.getEndpoints()
+    const transportUrls = getEndpoints()
     for (let h = 0; h < hostLength; h++) {
       let client = null
 
       if (isNodeRuntime()) {
-        const {protocol, hostname, port} = parseUrl(transportUrls[h])
+        const {protocol: parsedProtocol, hostname: parsedHost, port: parsedPort} = parseUrl(transportUrls[h])
         const connection = thriftWrapper.createHttpConnection(
-          hostname,
-          port,
+          parsedHost,
+          parsedPort,
           {
             transport: thriftWrapper.TBufferedTransport,
             protocol: thriftWrapper.TJSONProtocol,
             path: "/",
             headers: {Connection: "close"},
-            https: protocol === "https:"
+            https: parsedProtocol === "https:"
           }
         )
         connection.on("error", console.error) // eslint-disable-line no-console
@@ -137,14 +161,14 @@ class MapdCon {
         client = new MapDClientV2(thriftProtocol)
       }
 
-      client.connect(this._user[h], this._password[h], this._dbName[h], (error, sessionId) => {
+      client.connect(_user[h], _password[h], _dbName[h], (error, newSessionId) => { // eslint-disable-line no-loop-func
         if (error) {
           callback(error)
           return
         }
-        this._client.push(client)
-        this._sessionId.push(sessionId)
-        this._numConnections = this._client.length
+        _client.push(client)
+        _sessionId.push(newSessionId)
+        _numConnections = _client.length
         callback(null, this)
       })
     }
@@ -152,7 +176,7 @@ class MapdCon {
     return this
   }
 
-  convertFromThriftTypes (fields) {
+  function convertFromThriftTypes (fields) {
     const fieldsArray = []
     // silly to change this from map to array
     // - then later it turns back to map
@@ -160,7 +184,7 @@ class MapdCon {
       if (fields.hasOwnProperty(key)) {
         fieldsArray.push({
           name: key,
-          type: this._datumEnum[fields[key].col_type.type],
+          type: _datumEnum[fields[key].col_type.type],
           is_array: fields[key].col_type.is_array,
           is_dict: fields[key].col_type.encoding === TEncodingType.DICT // eslint-disable-line no-undef
         })
@@ -180,19 +204,19 @@ class MapdCon {
    * con.disconnect((err, con) => console.log(err, con))
    * con.sessionId() === null;
    */
-  disconnect (callback) {
-    if (this._sessionId !== null) {
-      for (let c = 0; c < this._client.length; c++) {
-        this._client[c].disconnect(this._sessionId[c], error => {
+  function disconnect (callback = noop) {
+    if (_sessionId !== null) {
+      for (let c = 0; c < _client.length; c++) {
+        _client[c].disconnect(_sessionId[c], error => { // eslint-disable-line no-loop-func
           // Success will return NULL
 
           if (error) {
             return callback(error, this)
           }
-          this._sessionId = null
-          this._client = null
-          this._numConnections = 0
-          this.serverPingTimes = null
+          _sessionId = null
+          _client = null
+          _numConnections = 0
+          serverPingTimes = null
           return callback(null, this)
         })
       }
@@ -200,13 +224,13 @@ class MapdCon {
     return this
   }
 
-  updateQueryTimes = (conId, queryId, estimatedQueryTime, execution_time_ms) => {
-    this.queryTimes[queryId] = execution_time_ms
+  function updateQueryTimes (conId, queryId, estimatedQueryTime, execution_time_ms) {
+    queryTimes[queryId] = execution_time_ms
   }
 
-  getFrontendViews = (callback) => {
-    if (this._sessionId) {
-      this._client[0].get_frontend_views(this._sessionId[0], callback)
+  function getFrontendViews (callback) {
+    if (_sessionId) {
+      _client[0].get_frontend_views(_sessionId[0], callback)
     } else {
       callback(new Error("No Session ID"))
     }
@@ -223,9 +247,9 @@ class MapdCon {
    * con.getFrontendViewsAsync().then((results) => console.log(results))
    * // [TFrontendView, TFrontendView]
    */
-  getFrontendViewsAsync = () => (
-    new Promise((resolve, reject) => {
-      this.getFrontendViews((error, views) => {
+  function getFrontendViewsAsync () {
+    return new Promise((resolve, reject) => {
+      getFrontendViews((error, views) => {
         if (error) {
           reject(error)
         } else {
@@ -233,11 +257,11 @@ class MapdCon {
         }
       })
     })
-  )
+  }
 
-  getFrontendView = (viewName, callback) => {
-    if (this._sessionId && viewName) {
-      this._client[0].get_frontend_view(this._sessionId[0], viewName, callback)
+  function getFrontendView (viewName, callback) {
+    if (_sessionId && viewName) {
+      _client[0].get_frontend_view(_sessionId[0], viewName, callback)
     } else {
       callback(new Error("No Session ID"))
     }
@@ -255,18 +279,20 @@ class MapdCon {
    * con.getFrontendViewAsync('dashboard_name').then((result) => console.log(result))
    * // {TFrontendView}
    */
-  getFrontendViewAsync = (viewName) => new Promise((resolve, reject) => {
-    this.getFrontendView(viewName, (err, view) => {
-      if (err) {
-        reject(err)
-      } else {
-        resolve(view)
-      }
+  function getFrontendViewAsync (viewName) {
+    return new Promise((resolve, reject) => {
+      getFrontendView(viewName, (err, view) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(view)
+        }
+      })
     })
-  })
+  }
 
-  getServerStatus = (callback) => {
-    this._client[0].get_server_status(this._sessionId[0], callback)
+  function getServerStatus (callback) {
+    _client[0].get_server_status(_sessionId[0], callback)
   }
 
   /**
@@ -286,17 +312,17 @@ class MapdCon {
    * // }
    */
 
-  getServerStatusAsync = () => (
-     new Promise((resolve, reject) => {
-       this.getServerStatus((err, result) => {
-         if (err) {
-           reject(err)
-         } else {
-           resolve(result)
-         }
-       })
-     })
-   )
+  function getServerStatusAsync () {
+    return new Promise((resolve, reject) => {
+      getServerStatus((err, result) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(result)
+        }
+      })
+    })
+  }
 
   /**
    * Add a new dashboard to the server.
@@ -310,15 +336,15 @@ class MapdCon {
    *
    * con.createFrontendViewAsync('newSave', 'viewstateBase64', null, 'metaData').then(res => console.log(res))
    */
-  createFrontendViewAsync (viewName, viewState, imageHash, metaData) {
-    if (!this._sessionId) {
+  function createFrontendViewAsync (viewName, viewState, imageHash, metaData) {
+    if (!_sessionId) {
       return new Promise((resolve, reject) => {
         reject(new Error("You are not connected to a server. Try running the connect method first."))
       })
     }
 
-    return Promise.all(this._client.map((client, i) => new Promise((resolve, reject) => {
-      client.create_frontend_view(this._sessionId[i], viewName, viewState, imageHash, metaData, (error, data) => {
+    return Promise.all(_client.map((client, i) => new Promise((resolve, reject) => {
+      client.create_frontend_view(_sessionId[i], viewName, viewState, imageHash, metaData, (error, data) => {
         if (error) {
           reject(error)
         } else {
@@ -328,14 +354,14 @@ class MapdCon {
     })))
   }
 
-  deleteFrontendView (viewName, callback) {
-    if (!this._sessionId) {
+  function deleteFrontendView (viewName, callback) {
+    if (!_sessionId) {
       throw new Error("You are not connected to a server. Try running the connect method first.")
     }
-    try {
-      this._client.forEach((client, i) => {
+    try { // eslint-disable-line no-restricted-syntax
+      _client.forEach((client, i) => {
         // do we want to try each one individually so if we fail we keep going?
-        client.delete_frontend_view(this._sessionId[i], viewName, callback)
+        client.delete_frontend_view(_sessionId[i], viewName, callback)
       })
     } catch (err) {
       console.log("ERROR: Could not delete the frontend view. Check your session id.", err)
@@ -351,15 +377,17 @@ class MapdCon {
    *
    * con.deleteFrontendViewAsync('dashboard_name').then(res => console.log(res))
    */
-  deleteFrontendViewAsync = (viewName) => new Promise((resolve, reject) => {
-    this.deleteFrontendView(viewName, (err) => {
-      if (err) {
-        reject(err)
-      } else {
-        resolve(viewName)
-      }
+  function deleteFrontendViewAsync (viewName) {
+    return new Promise((resolve, reject) => {
+      deleteFrontendView(viewName, (err) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(viewName)
+        }
+      })
     })
-  })
+  }
 
   /**
    * Create a short hash to make it easy to share a link to a specific dashboard.
@@ -372,9 +400,9 @@ class MapdCon {
    * con.createLinkAsync("eyJuYW1lIjoibXlkYXNoYm9hcmQifQ==", 'metaData').then(res => console.log(res));
    * // ["28127951"]
    */
-  createLinkAsync (viewState, metaData) {
-    return Promise.all(this._client.map((client, i) => new Promise((resolve, reject) => {
-      client.create_link(this._sessionId[i], viewState, metaData, (error, data) => {
+  function createLinkAsync (viewState, metaData) {
+    return Promise.all(_client.map((client, i) => new Promise((resolve, reject) => {
+      client.create_link(_sessionId[i], viewState, metaData, (error, data) => {
         if (error) {
           reject(error)
         } else {
@@ -392,8 +420,8 @@ class MapdCon {
     })))
   }
 
-  getLinkView = (link, callback) => {
-    this._client[0].get_link_view(this._sessionId[0], link, callback)
+  function getLinkView (link, callback) {
+    _client[0].get_link_view(_sessionId[0], link, callback)
   }
 
   /**
@@ -413,19 +441,21 @@ class MapdCon {
    * //    "view_metadata": "metaData"
    * //  }
    */
-  getLinkViewAsync = (link) => new Promise((resolve, reject) => {
-    this.getLinkView(link, (err, theLink) => {
-      if (err) {
-        reject(err)
-      } else {
-        resolve(theLink)
-      }
+  function getLinkViewAsync (link) {
+    return new Promise((resolve, reject) => {
+      getLinkView(link, (err, theLink) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve(theLink)
+        }
+      })
     })
-  })
+  }
 
-  detectColumnTypes (fileName, copyParams, callback) {
+  function detectColumnTypes (fileName, copyParams, callback) {
     const thriftCopyParams = helpers.convertObjectToThriftCopyParams(copyParams)
-    this._client[0].detect_column_types(this._sessionId[0], fileName, thriftCopyParams, callback)
+    _client[0].detect_column_types(_sessionId[0], fileName, thriftCopyParams, callback)
   }
 
   /**
@@ -442,13 +472,13 @@ class MapdCon {
    * // TDetectResult {row_set: TRowSet, copy_params: TCopyParams}
    *
    */
-  detectColumnTypesAsync (fileName, copyParams) {
+  function detectColumnTypesAsync (fileName, copyParams) {
     return new Promise((resolve, reject) => {
-      this.detectColumnTypes.bind(this, fileName, copyParams)((err, res) => {
+      detectColumnTypes.bind(this, fileName, copyParams)((err, res) => {
         if (err) {
           reject(err)
         } else {
-          this.importerRowDesc = res.row_set.row_desc
+          importerRowDesc = res.row_set.row_desc
           resolve(res)
         }
       })
@@ -457,7 +487,7 @@ class MapdCon {
 
   /**
    * Submit a query to the database and process the results.
-   * @param {String} query The query to perform
+   * @param {String} sql The query to perform
    * @param {Object} options the options for the query
    * @param {Function} callback that takes `(err, result) => result`
    * @returns {Object} The result of the query
@@ -472,7 +502,7 @@ class MapdCon {
    *      });
    *
    */
-  query (query, options, callback) {
+  function query (sql, options, callback) {
     let columnarResults = true
     let eliminateNullRows = false
     let queryId = null
@@ -486,16 +516,16 @@ class MapdCon {
       limit = options.hasOwnProperty("limit") ? options.limit : limit
     }
 
-    const lastQueryTime = queryId in this.queryTimes ? this.queryTimes[queryId] : this.DEFAULT_QUERY_TIME
+    const lastQueryTime = queryId in queryTimes ? queryTimes[queryId] : DEFAULT_QUERY_TIME
 
-    const curNonce = (this._nonce++).toString()
+    const curNonce = (_nonce++).toString()
 
     const conId = 0
 
     const processResultsOptions = {
       returnTiming,
       eliminateNullRows,
-      query,
+      sql,
       queryId,
       conId,
       estimatedQueryTime: lastQueryTime
@@ -503,32 +533,32 @@ class MapdCon {
 
     try {
       if (callback) {
-        this._client[conId].sql_execute(this._sessionId[conId], query, columnarResults, curNonce, limit, (error, result) => {
+        _client[conId].sql_execute(_sessionId[conId], sql, columnarResults, curNonce, limit, (error, result) => {
           if (error) {
             callback(error)
           } else {
-            this.processResults(processResultsOptions, result, callback)
+            processResults(processResultsOptions, result, callback)
           }
         })
         return curNonce
       } else if (!callback) {
-        const SQLExecuteResult = this._client[conId].sql_execute(
-          this._sessionId[conId],
-          query,
+        const SQLExecuteResult = _client[conId].sql_execute(
+          _sessionId[conId],
+          sql,
           columnarResults,
           curNonce,
           limit
         )
-        return this.processResults(processResultsOptions, SQLExecuteResult)
+        return processResults(processResultsOptions, SQLExecuteResult)
       }
     } catch (err) {
       if (err.name === "NetworkError") {
-        this.removeConnection(conId)
-        if (this._numConnections === 0) {
+        removeConnection(conId)
+        if (_numConnections === 0) {
           err.msg = "No remaining database connections"
           throw err
         }
-        this.query(query, options, callback)
+        query(sql, options, callback)
       } else if (callback) {
         callback(err)
       } else {
@@ -537,12 +567,9 @@ class MapdCon {
     }
   }
 
-  /** @deprecated will default to query */
-  queryAsync = this.query
-
   /**
    * Submit a query to validate whether the backend can create a result set based on the SQL statement.
-   * @param {String} query The query to perform
+   * @param {String} sql The query to perform
    * @returns {Promise.<Object>} The result of whether the query is valid
    *
    * @example <caption>create a query</caption>
@@ -559,32 +586,32 @@ class MapdCon {
    * //  }]
    *
    */
-  validateQuery (query) {
+  function validateQuery (sql) {
     return new Promise((resolve, reject) => {
-      this._client[0].sql_validate(this._sessionId[0], query, (error, res) => {
+      _client[0].sql_validate(_sessionId[0], sql, (error, res) => {
         if (error) {
           reject(error)
         } else {
-          resolve(this.convertFromThriftTypes(res))
+          resolve(convertFromThriftTypes(res))
         }
       })
     })
   }
 
-  removeConnection (conId) {
-    if (conId < 0 || conId >= this.numConnections) {
+  function removeConnection (conId) {
+    if (conId < 0 || conId >= numConnections) {
       const err = {
         msg: "Remove connection id invalid"
       }
       throw err
     }
-    this._client.splice(conId, 1)
-    this._sessionId.splice(conId, 1)
-    this._numConnections--
+    _client.splice(conId, 1)
+    _sessionId.splice(conId, 1)
+    _numConnections--
   }
 
-  getTables (callback) {
-    this._client[0].get_tables(this._sessionId[0], (error, tables) => {
+  function getTables (callback) {
+    _client[0].get_tables(_sessionId[0], (error, tables) => {
       if (error) {
         callback(error)
       } else {
@@ -610,9 +637,9 @@ class MapdCon {
    *  //   },
    *  //  ...]
    */
-  getTablesAsync () {
+  function getTablesAsync () {
     return new Promise((resolve, reject) => {
-      this.getTables.bind(this)((error, tables) => {
+      getTables.bind(this)((error, tables) => {
         if (error) {
           reject(error)
         } else {
@@ -625,14 +652,14 @@ class MapdCon {
   /**
    * Create an array-like object from {@link TDatumType} by
    * flipping the string key and numerical value around.
-   *
+   * @param {Object} datumEnum - TODO
    * @returns {Undefined} This function does not return anything
    */
-  invertDatumTypes () {
+  function invertDatumTypes (datumEnum) {
     const datumType = TDatumType // eslint-disable-line no-undef
     for (const key in datumType) {
       if (datumType.hasOwnProperty(key)) {
-        this._datumEnum[datumType[key]] = key
+        datumEnum[datumType[key]] = key
       }
     }
   }
@@ -653,14 +680,14 @@ class MapdCon {
    *   is_dict: false
    * }, ...]
    */
-  getFields (tableName, callback) {
-    this._client[0].get_table_details(this._sessionId[0], tableName, (error, fields) => {
+  function getFields (tableName, callback) {
+    _client[0].get_table_details(_sessionId[0], tableName, (error, fields) => {
       if (fields) {
         const rowDict = fields.row_desc.reduce((accum, value) => {
           accum[value.col_name] = value
           return accum
         }, {})
-        callback(null, this.convertFromThriftTypes(rowDict))
+        callback(null, convertFromThriftTypes(rowDict))
       } else {
         callback(new Error("Table (" + tableName + ") not found" + error))
       }
@@ -668,16 +695,16 @@ class MapdCon {
   }
 
 
-  createTable (tableName, rowDescObj, tableType, callback) {
-    if (!this._sessionId) {
+  function createTable (tableName, rowDescObj, tableType, callback) {
+    if (!_sessionId) {
       throw new Error("You are not connected to a server. Try running the connect method first.")
     }
 
-    const thriftRowDesc = helpers.mutateThriftRowDesc(rowDescObj, this.importerRowDesc)
+    const thriftRowDesc = helpers.mutateThriftRowDesc(rowDescObj, importerRowDesc)
 
-    for (let c = 0; c < this._numConnections; c++) {
-      this._client[c].create_table(
-        this._sessionId[c],
+    for (let c = 0; c < _numConnections; c++) {
+      _client[c].create_table(
+        _sessionId[c],
         tableName,
         thriftRowDesc,
         tableType,
@@ -705,23 +732,25 @@ class MapdCon {
    *  con.createTable('mynewtable', [TColumnType, TColumnType, ...], 0).then(res => console.log(res));
    *  // undefined
    */
-  createTableAsync = (tableName, rowDescObj, tableType) => new Promise((resolve, reject) => {
-    this.createTable(tableName, rowDescObj, tableType, (err) => {
-      if (err) {
-        reject(err)
-      } else {
-        resolve()
-      }
+  function createTableAsync (tableName, rowDescObj, tableType) {
+    return new Promise((resolve, reject) => {
+      createTable(tableName, rowDescObj, tableType, (err) => {
+        if (err) {
+          reject(err)
+        } else {
+          resolve()
+        }
+      })
     })
-  })
+  }
 
-  importTable (tableName, fileName, copyParams, rowDescObj, isShapeFile, callback) {
-    if (!this._sessionId) {
+  function importTable (tableName, fileName, copyParams, rowDescObj, isShapeFile, callback) {
+    if (!_sessionId) {
       throw new Error("You are not connected to a server. Try running the connect method first.")
     }
 
     const thriftCopyParams = helpers.convertObjectToThriftCopyParams(copyParams)
-    const thriftRowDesc = helpers.mutateThriftRowDesc(rowDescObj, this.importerRowDesc)
+    const thriftRowDesc = helpers.mutateThriftRowDesc(rowDescObj, importerRowDesc)
 
     const thriftCallBack = (err, res) => {
       if (err) {
@@ -731,10 +760,10 @@ class MapdCon {
       }
     }
 
-    for (let c = 0; c < this._numConnections; c++) {
+    for (let c = 0; c < _numConnections; c++) {
       if (isShapeFile) {
-        this._client[c].import_geo_table(
-          this._sessionId[c],
+        _client[c].import_geo_table(
+          _sessionId[c],
           tableName,
           fileName,
           thriftCopyParams,
@@ -742,8 +771,8 @@ class MapdCon {
           thriftCallBack
         )
       } else {
-        this._client[c].import_table(
-          this._sessionId[c],
+        _client[c].import_table(
+          _sessionId[c],
           tableName,
           fileName,
           thriftCopyParams,
@@ -753,9 +782,9 @@ class MapdCon {
     }
   }
 
-  importTableAsyncWrapper (isShapeFile) {
+  function importTableAsyncWrapper (isShapeFile) {
     return (tableName, fileName, copyParams, headers) => new Promise((resolve, reject) => {
-      this.importTable(tableName, fileName, copyParams, headers, isShapeFile, (err, link) => {
+      importTable(tableName, fileName, copyParams, headers, isShapeFile, (err, link) => {
         if (err) {
           reject(err)
         } else {
@@ -764,24 +793,6 @@ class MapdCon {
       })
     })
   }
-
-  /**
-   * Import a delimited table from a file.
-   * @param {String} tableName - desired name of the new table
-   * @param {String} fileName
-   * @param {TCopyParams} copyParams - see {@link TCopyParams}
-   * @param {TColumnType[]} headers -- a colleciton of metadata related to the table headers
-   */
-  importTableAsync = this.importTableAsyncWrapper(false)
-
-  /**
-   * Import a geo table from a file.
-   * @param {String} tableName - desired name of the new table
-   * @param {String} fileName
-   * @param {TCopyParams} copyParams - see {@link TCopyParams}
-   * @param {TColumnType[]} headers -- a colleciton of metadata related to the table headers
-   */
-  importTableGeoAsync = this.importTableAsyncWrapper(true)
 
   /**
    * Use for backend rendering. This method will fetch a PNG image
@@ -797,7 +808,7 @@ class MapdCon {
    *
    * @returns {Image} Base 64 Image
    */
-  renderVega (widgetid, vega, options, callback) /* istanbul ignore next */ {
+  function renderVega (widgetid, vega, options, callback) /* istanbul ignore next */ {
     let queryId = null
     let compressionLevel = COMPRESSION_LEVEL_DEFAULT
     if (options) {
@@ -805,12 +816,12 @@ class MapdCon {
       compressionLevel = options.hasOwnProperty("compressionLevel") ? options.compressionLevel : compressionLevel
     }
 
-    const lastQueryTime = queryId in this.queryTimes ? this.queryTimes[queryId] : this.DEFAULT_QUERY_TIME
+    const lastQueryTime = queryId in queryTimes ? queryTimes[queryId] : DEFAULT_QUERY_TIME
 
-    const curNonce = (this._nonce++).toString()
+    const curNonce = (_nonce++).toString()
 
     const conId = 0
-    this._lastRenderCon = conId
+    _lastRenderCon = conId
 
     const processResultsOptions = {
       isImage: true,
@@ -822,21 +833,21 @@ class MapdCon {
 
     try {
       if (!callback) {
-        const renderResult = this._client[conId].render_vega(
-          this._sessionId[conId],
+        const renderResult = _client[conId].render_vega(
+          _sessionId[conId],
           widgetid,
           vega,
           compressionLevel,
           curNonce
         )
-        return this.processResults(processResultsOptions, renderResult)
+        return processResults(processResultsOptions, renderResult)
       }
 
-      this._client[conId].render_vega(this._sessionId[conId], widgetid, vega, compressionLevel, curNonce, (error, result) => {
+      _client[conId].render_vega(_sessionId[conId], widgetid, vega, compressionLevel, curNonce, (error, result) => {
         if (error) {
           callback(error)
         } else {
-          this.processResults(processResultsOptions, result, callback)
+          processResults(processResultsOptions, result, callback)
         }
       })
     } catch (err) {
@@ -858,16 +869,16 @@ class MapdCon {
    * @param {Number} [pixelRadius=2] - the radius around the primary pixel to search
    */
 
-  getResultRowForPixel (widgetId, pixel, tableColNamesMap, callbacks, pixelRadius = 2) /* istanbul ignore next */ {
+  function getResultRowForPixel (widgetId, pixel, tableColNamesMap, callbacks, pixelRadius = 2) /* istanbul ignore next */ {
     if (!(pixel instanceof TPixel)) { pixel = new TPixel(pixel) }
     const columnFormat = true // BOOL
-    const curNonce = (this._nonce++).toString()
+    const curNonce = (_nonce++).toString()
     try {
       if (!callbacks) {
-        return this.processPixelResults(
+        return processPixelResults(
           undefined, // eslint-disable-line no-undefined
-          this._client[this._lastRenderCon].get_result_row_for_pixel(
-            this._sessionId[this._lastRenderCon],
+          _client[_lastRenderCon].get_result_row_for_pixel(
+            _sessionId[_lastRenderCon],
             widgetId,
             pixel,
             tableColNamesMap,
@@ -876,15 +887,15 @@ class MapdCon {
             curNonce
           ))
       }
-      this._client[this._lastRenderCon].get_result_row_for_pixel(
-        this._sessionId[this._lastRenderCon],
+      _client[_lastRenderCon].get_result_row_for_pixel(
+        _sessionId[_lastRenderCon],
         widgetId,
         pixel,
         tableColNamesMap,
         columnFormat,
         pixelRadius,
         curNonce,
-        this.processPixelResults.bind(this, callbacks)
+        processPixelResults.bind(this, callbacks)
       )
     } catch (err) {
       throw err
@@ -902,7 +913,7 @@ class MapdCon {
    *
    * @returns {Object} An object with the pixel results formatted for display
    */
-  processPixelResults (callbacks, error, results) {
+  function processPixelResults (callbacks, error, results) {
     callbacks = Array.isArray(callbacks) ? callbacks : [callbacks]
     results = Array.isArray(results) ? results.pixel_rows : [results]
     const numPixels = results.length
@@ -913,7 +924,7 @@ class MapdCon {
       queryId: -2
     }
     for (let p = 0; p < numPixels; p++) {
-      results[p].row_set = this.processResults(processResultsOptions, results[p])
+      results[p].row_set = processResults(processResultsOptions, results[p])
     }
     if (!callbacks) {
       return results
@@ -924,7 +935,7 @@ class MapdCon {
   /**
    * Get or set the session ID used by the server to serve the correct data.
    * This is typically set by {@link connect} and should not be set manually.
-   * @param {Number} sessionId - The session ID of the current connection
+   * @param {Number} newSessionId - The session ID of the current connection
    * @return {Number|MapdCon} - The session ID or the MapdCon itself
    *
    * @example <caption>Get the session id:</caption>
@@ -936,18 +947,18 @@ class MapdCon {
    * var con = new MapdCon().connect().sessionId(3415846410);
    * // NOTE: It is generally unsafe to set the session id manually.
    */
-  sessionId (sessionId) {
+  function sessionId (newSessionId) {
     if (!arguments.length) {
-      return this._sessionId
+      return _sessionId
     }
-    this._sessionId = sessionId
+    _sessionId = newSessionId
     return this
   }
 
   /**
    * Get or set the connection server hostname.
    * This is is typically the first method called after instantiating a new MapdCon.
-   * @param {String} host - The hostname address
+   * @param {String} hostname - The hostname address
    * @return {String|MapdCon} - The hostname or the MapdCon itself
    *
    * @example <caption>Set the hostname:</caption>
@@ -957,17 +968,17 @@ class MapdCon {
    * var host = con.host();
    * // host === 'localhost'
    */
-  host (host) {
+  function host (hostname) {
     if (!arguments.length) {
-      return this._host
+      return _host
     }
-    this._host = arrayify(host)
+    _host = arrayify(hostname)
     return this
   }
 
   /**
    * Get or set the connection port.
-   * @param {String} port - The port to connect on
+   * @param {String} thePort - The port to connect on
    * @return {String|MapdCon} - The port or the MapdCon itself
    *
    * @example <caption>Set the port:</caption>
@@ -977,17 +988,17 @@ class MapdCon {
    * var port = con.port();
    * // port === '8080'
    */
-  port (port) {
+  function port (thePort) {
     if (!arguments.length) {
-      return this._port
+      return _port
     }
-    this._port = arrayify(port)
+    _port = arrayify(thePort)
     return this
   }
 
   /**
    * Get or set the username to authenticate with.
-   * @param {String} user - The username to authenticate with
+   * @param {String} username - The username to authenticate with
    * @return {String|MapdCon} - The username or the MapdCon itself
    *
    * @example <caption>Set the username:</caption>
@@ -997,17 +1008,17 @@ class MapdCon {
    * var username = con.user();
    * // user === 'foo'
    */
-  user (user) {
+  function user (username) {
     if (!arguments.length) {
-      return this._user
+      return _user
     }
-    this._user = arrayify(user)
+    _user = arrayify(username)
     return this
   }
 
   /**
    * Get or set the user's password to authenticate with.
-   * @param {String} password - The password to authenticate with
+   * @param {String} pass - The password to authenticate with
    * @return {String|MapdCon} - The password or the MapdCon itself
    *
    * @example <caption>Set the password:</caption>
@@ -1017,17 +1028,17 @@ class MapdCon {
    * var password = con.password();
    * // password === 'bar'
    */
-  password (password) {
+  function password (pass) {
     if (!arguments.length) {
-      return this._password
+      return _password
     }
-    this._password = arrayify(password)
+    _password = arrayify(pass)
     return this
   }
 
   /**
    * Get or set the name of the database to connect to.
-   * @param {String} dbName - The database to connect to
+   * @param {String} db - The database to connect to
    * @return {String|MapdCon} - The name of the database or the MapdCon itself
    *
    * @example <caption>Set the database name:</caption>
@@ -1037,18 +1048,18 @@ class MapdCon {
    * var dbName = con.dbName();
    * // dbName === 'myDatabase'
    */
-  dbName (dbName) {
+  function dbName (db) {
     if (!arguments.length) {
-      return this._dbName
+      return _dbName
     }
-    this._dbName = arrayify(dbName)
+    _dbName = arrayify(db)
     return this
   }
 
   /**
    * Whether the raw queries strings will be logged to the console.
    * Used primarily for debugging and defaults to <code>false</code>.
-   * @param {Boolean} logging - Set to true to enable logging
+   * @param {Boolean} loggingEnabled - Set to true to enable logging
    * @return {Boolean|MapdCon} - The current logging flag or MapdCon itself
    *
    * @example <caption>Set logging to true:</caption>
@@ -1058,20 +1069,20 @@ class MapdCon {
    * var isLogging = con.logging();
    * // isLogging === true
    */
-  logging (logging) {
-    if (typeof logging === "undefined") {
-      return this._logging
-    } else if (typeof (logging) !== "boolean") {
+  function logging (loggingEnabled) {
+    if (typeof loggingEnabled === "undefined") {
+      return _logging
+    } else if (typeof loggingEnabled !== "boolean") {
       return "logging can only be set with boolean values"
     }
-    this._logging = logging
-    const isEnabledTxt = logging ? "enabled" : "disabled"
+    _logging = loggingEnabled
+    const isEnabledTxt = loggingEnabled ? "enabled" : "disabled"
     return `SQL logging is now ${isEnabledTxt}`
   }
 
   /**
    * The name of the platform.
-   * @param {String} platform - The platform, default is "mapd"
+   * @param {String} thePlatform - The platform, default is "mapd"
    * @return {String|MapdCon} - The platform or the MapdCon itself
    *
    * @example <caption>Set the platform name:</caption>
@@ -1081,11 +1092,11 @@ class MapdCon {
    * var platform = con.platform();
    * // platform === 'myPlatform'
    */
-  platform (platform) {
+  function platform (thePlatform) {
     if (!arguments.length) {
-      return this._platform
+      return _platform
     }
-    this._platform = platform
+    _platform = thePlatform
     return this
   }
 
@@ -1098,13 +1109,13 @@ class MapdCon {
    * var numConnections = con.numConnections();
    * // numConnections === 1
    */
-  numConnections () {
-    return this._numConnections
+  function numConnections () {
+    return _numConnections
   }
 
   /**
    * The protocol to use for requests.
-   * @param {String} protocol - http or https
+   * @param {String} theProtocol - http or https
    * @return {String|MapdCon} - protocol or MapdCon itself
    *
    * @example <caption>Set the protocol:</caption>
@@ -1114,11 +1125,11 @@ class MapdCon {
    * var protocol = con.protocol();
    * // protocol === 'http'
    */
-  protocol (protocol) {
+  function protocol (theProtocol) {
     if (!arguments.length) {
-      return this._protocol
+      return _protocol
     }
-    this._protocol = arrayify(protocol)
+    _protocol = arrayify(theProtocol)
     return this
   }
 
@@ -1131,8 +1142,8 @@ class MapdCon {
    * var endpoints = con.getEndpoints();
    * // endpoints === [ 'http://localhost:8000' ]
    */
-  getEndpoints () {
-    return this._host.map((host, i) => this._protocol[i] + "://" + host + ":" + this._port[i])
+  function getEndpoints () {
+    return _host.map((oldHost, i) => _protocol[i] + "://" + oldHost + ":" + _port[i])
   }
 }
 
