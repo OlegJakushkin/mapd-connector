@@ -174,7 +174,7 @@
 	}
 
 	function MapdCon() {
-	  publicizeMethods(this, [connect, dbName, disconnect, getFields, getResultRowForPixel, getServerStatusAsync, getTablesAsync, host, password, port, protocol, query, renderVega, user]);
+	  publicizeMethods(this, [connect, createFrontendViewAsync, createLinkAsync, createTableAsync, dbName, deleteFrontendViewAsync, detectColumnTypesAsync, disconnect, getFields, getResultRowForPixel, getServerStatusAsync, getTablesAsync, host, logging, password, port, protocol, query, renderVega, sessionId, user]);
 
 	  var _host = null;
 	  var _user = null;

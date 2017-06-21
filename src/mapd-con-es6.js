@@ -32,18 +32,25 @@ function publicizeMethods (theClass, methods) { methods.forEach(method => { theC
 function MapdCon () {
   publicizeMethods(this, [
     connect,
+    createFrontendViewAsync,
+    createLinkAsync,
+    createTableAsync,
     dbName,
+    deleteFrontendViewAsync,
+    detectColumnTypesAsync,
     disconnect,
     getFields,
     getResultRowForPixel,
     getServerStatusAsync,
     getTablesAsync,
     host,
+    logging,
     password,
     port,
     protocol,
     query,
     renderVega,
+    sessionId,
     user
   ])
 
