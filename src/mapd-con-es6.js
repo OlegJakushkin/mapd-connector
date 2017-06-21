@@ -30,7 +30,22 @@ function isNodeRuntime () { return typeof window === "undefined" }
 function publicizeMethods (theClass, methods) { methods.forEach(method => { theClass[method.name] = method }) }
 
 function MapdCon () {
-  publicizeMethods(this, [connect, host, user, password, port, dbName, protocol, disconnect, getTablesAsync, getFields, query, renderVega, getResultRowForPixel])
+  publicizeMethods(this, [
+    connect,
+    dbName,
+    disconnect,
+    getFields,
+    getResultRowForPixel,
+    getServerStatusAsync,
+    getTablesAsync,
+    host,
+    password,
+    port,
+    protocol,
+    query,
+    renderVega,
+    user
+  ])
 
   let _host = null
   let _user = null
@@ -53,7 +68,7 @@ function MapdCon () {
   const pingCount = null
   let importerRowDesc = null
   // invoke initialization methods
-  invertDatumTypes(_datumEnum)
+  invertDatumTypes(_datumEnum) // TODO might just be for v1
   function processResults (options = {}, result, callback) { // TODO having defaulted params should be "
     const processor = processQueryResults(_logging, updateQueryTimes)
     const processResultsObject = processor(options, _datumEnum, result, callback)

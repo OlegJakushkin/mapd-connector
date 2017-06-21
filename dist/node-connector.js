@@ -25466,7 +25466,7 @@ module.exports =
 	}
 
 	function MapdCon() {
-	  publicizeMethods(this, [connect, host, user, password, port, dbName, protocol, disconnect, getTablesAsync, getFields, query, renderVega, getResultRowForPixel]);
+	  publicizeMethods(this, [connect, dbName, disconnect, getFields, getResultRowForPixel, getServerStatusAsync, getTablesAsync, host, password, port, protocol, query, renderVega, user]);
 
 	  var _host = null;
 	  var _user = null;
@@ -25489,7 +25489,7 @@ module.exports =
 	  var pingCount = null;
 	  var importerRowDesc = null;
 	  // invoke initialization methods
-	  invertDatumTypes(_datumEnum);
+	  invertDatumTypes(_datumEnum); // TODO might just be for v1
 	  function processResults() {
 	    var options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
 	    var result = arguments[1];
